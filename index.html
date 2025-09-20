@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cadastro de Vendedor</title>
+
+  <!-- SDK do OneSignal -->
+  <script src="https://cdn.onesignal.com/sdks/OneSignalSDK.js" async=""></script>
+  <script>
+    window.OneSignal = window.OneSignal || [];
+    OneSignal.push(function() {
+      OneSignal.init({
+        appId: "b29c4630-b556-45fe-af1b-ae9580c97df6", // 🔹 coloque aqui seu App ID do OneSignal
+        allowLocalhostAsSecureOrigin: true
+      });
+    });
+  </script>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f5f5f5;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+    .card {
+      background: white;
+      padding: 20px;
+      border-radius: 12px;
+      box-shadow: 0px 4px 12px rgba(0,0,0,0.1);
+      width: 350px;
+    }
+    h2 {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    input, button {
+      width: 100%;
+      padding: 10px;
+      margin: 8px 0;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+    }
+    button {
+      background: #007bff;
+      color: white;
+      font-weight: bold;
+      cursor: pointer;
+      border: none;
+    }
+    button:hover {
+      background: #0056b3;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="card">
+    <h2>Cadastro Vendedor</h2>
+    <form id="cadastroForm">
+      <input type="text" id="nome" placeholder="Nome completo" required>
+      <input type="text" id="telefone" placeholder="Telefone" required>
+      <input type="text" id="empresa" placeholder="Empresa" required>
+      <button type="submit">Cadastrar e Ativar Notificação</button>
+    </form>
+  </div>
+
+  <script>
+    const SUPABASE_URL = "https://ymshbfpxeetqqlgzgvkp.supabase.co";      // 🔹 ex: https://xxxx.supabase.co
+    const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inltc2hiZnB4ZWV0cXFsZ3pndmtwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTgzNjcxNTYsImV4cCI6MjA3Mzk0MzE1Nn0.ysbTxq0C1yITXSl9qorIxl8XxtxaRaePviHmUy3Q-24";  // 🔹 coloque sua chave pública
+    const TABLE_NAME = "vendedores";              // 🔹 nome da tabela no Supabase
+
+    document.getElementById("cadastroForm").addEventListener("submit", async function(e) {
+      e.preventDefault();
+
+      const nome = document.getElementById("nome").value;
+      const telefone = document.getElementById("telefone").value;
+      const empresa = document.getElementById("empresa").value;
+
+      // 1. Pegar o token do OneSignal
+      const userId = await OneSignal.getUserId();
+
+      if (!userId) {
+        alert("Erro: não foi possível capturar o token de notificação.");
+        return;
+      }
+
+      // 2. Salvar no Supabase
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE_NAME}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "apikey": SUPABASE_KEY,
+          "Authorization": `Bearer ${SUPABASE_KEY}`,
+          "Prefer": "return=representation"
+        },
+        body: JSON.stringify({
+          nome: nome,
+          telefone: telefone,
+          empresa: empresa,
+          token_push: userId
+        })
+      });
+
+      if (response.ok) {
+        alert("Cadastro realizado com sucesso e notificações ativadas!");
+      } else {
+        alert("Erro ao cadastrar. Verifique as credenciais.");
+      }
+    });
+  </script>
+</body>
+</html>

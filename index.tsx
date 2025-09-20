@@ -13,6 +13,35 @@ const SUPABASE_URL = "https://ymshbfpxeetqqlgzgvkp.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inltc2hiZnB4ZWV0cXFsZ3pndmtwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTgzNjcxNTYsImV4cCI6MjA3Mzk0MzE1Nn0.ysbTxq0C1yITXSl9qorIxl8XxtxaRaePviHmUy3Q-24";
 const TABLE_NAME = "vendedores";
 
+// Helper function to reliably get the OneSignal User ID. It now also checks
+// for an existing ID to prevent race conditions.
+const getUserIdAfterPermission = (): Promise<string> => {
+    return new Promise((resolve, reject) => {
+        // First, check if an ID already exists.
+        const existingId = window.OneSignal.User.getPushSubscriptionId();
+        if (existingId) {
+            return resolve(existingId);
+        }
+
+        const timeout = setTimeout(() => {
+            window.OneSignal.User.removeEventListener('idAvailable', onIdAvailable);
+            reject(new Error("A obtenção do ID de notificação demorou demais. Por favor, recarregue a página e tente novamente."));
+        }, 15000); // 15-second timeout
+
+        const onIdAvailable = ({ id }: { id: string }) => {
+            clearTimeout(timeout);
+            window.OneSignal.User.removeEventListener('idAvailable', onIdAvailable);
+            if (id) {
+                resolve(id);
+            } else {
+                reject(new Error("Não foi possível obter um ID de notificação."));
+            }
+        };
+        
+        window.OneSignal.User.addEventListener('idAvailable', onIdAvailable);
+    });
+};
+
 const App = () => {
   const [nome, setNome] = useState('');
   const [telefone, setTelefone] = useState('');
@@ -20,66 +49,62 @@ const App = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setIsLoading(true);
     setMessage(null);
 
-    try {
-        // Wrap OneSignal calls in a push function to ensure the SDK is initialized
-        await window.OneSignal.push(async () => {
-            // 1. Proactively request permission. This shows the prompt.
-            const permission = await window.OneSignal.Notifications.requestPermission();
-            
-            if (!permission) {
-                throw new Error("Permissão para notificações foi negada. O cadastro não pode prosseguir sem a sua autorização.");
-            }
+    // Use OneSignal.push() to queue the function. This ensures the OneSignal SDK
+    // is fully initialized before any of its methods are called, resolving the "Script error.".
+    window.OneSignal.push(async () => {
+      try {
+          // 1. Proactively request permission.
+          const permission = await window.OneSignal.Notifications.requestPermission();
+          
+          if (!permission) {
+              throw new Error("Permissão para notificações foi negada. O cadastro não pode prosseguir sem a sua autorização.");
+          }
+          
+          // 2. Await the promise that resolves when the ID is available.
+          const userId = await getUserIdAfterPermission();
 
-            // 2. Now that permission is granted, get the user ID.
-            const userId = await window.OneSignal.getUserId();
+          // 3. Save to Supabase
+          const response = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE_NAME}`, {
+              method: "POST",
+              headers: {
+                  "Content-Type": "application/json",
+                  "apikey": SUPABASE_KEY,
+                  "Authorization": `Bearer ${SUPABASE_KEY}`,
+                  "Prefer": "return=representation"
+              },
+              body: JSON.stringify({
+                  nome: nome,
+                  telefone: telefone,
+                  empresa: empresa,
+                  token_push: userId
+              })
+          });
 
-            if (!userId) {
-                // This is an unlikely edge case, but good to handle.
-                throw new Error("Permissão concedida, mas não foi possível obter o ID de notificação. Por favor, recarregue a página e tente novamente.");
-            }
+          if (!response.ok) {
+              const errorData = await response.json();
+              console.error("Supabase error:", errorData);
+              throw new Error(errorData.message || "Erro ao cadastrar. Verifique os dados e tente novamente.");
+          }
 
-            // 3. Save to Supabase
-            const response = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE_NAME}`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "apikey": SUPABASE_KEY,
-                    "Authorization": `Bearer ${SUPABASE_KEY}`,
-                    "Prefer": "return=representation"
-                },
-                body: JSON.stringify({
-                    nome: nome,
-                    telefone: telefone,
-                    empresa: empresa,
-                    token_push: userId
-                })
-            });
+          setMessage({ text: "Cadastro realizado com sucesso e notificações ativadas!", type: 'success' });
+          // Clear form
+          setNome('');
+          setTelefone('');
+          setEmpresa('');
+          setIsLoading(false);
 
-            if (!response.ok) {
-                const errorData = await response.json();
-                console.error("Supabase error:", errorData);
-                throw new Error(errorData.message || "Erro ao cadastrar. Verifique os dados e tente novamente.");
-            }
-
-            setMessage({ text: "Cadastro realizado com sucesso e notificações ativadas!", type: 'success' });
-            // Clear form
-            setNome('');
-            setTelefone('');
-            setEmpresa('');
-        });
-
-    } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : "Ocorreu um erro inesperado.";
-        setMessage({ text: errorMessage, type: 'error' });
-        console.error(error);
-    } finally {
-        setIsLoading(false);
-    }
+      } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : "Ocorreu um erro inesperado.";
+          setMessage({ text: errorMessage, type: 'error' });
+          console.error(error);
+          setIsLoading(false); // Ensure loading is stopped on error
+      }
+    });
   };
 
   return (
